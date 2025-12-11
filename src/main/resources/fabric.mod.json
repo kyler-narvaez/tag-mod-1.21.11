@@ -1,0 +1,40 @@
+{
+	"schemaVersion": 1,
+	"id": "tag-mod",
+	"version": "${version}",
+	"name": "Tag Mod",
+	"description": "You be runnin",
+	"authors": [
+		"Me!"
+	],
+	"contact": {
+		"homepage": "https://fabricmc.net/",
+		"sources": "https://github.com/FabricMC/fabric-example-mod"
+	},
+	"license": "CC0-1.0",
+	"icon": "assets/tag-mod/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"com.kylernarvaez.tagmod.TagMod"
+		],
+		"fabric-datagen": [
+			"com.kylernarvaez.tagmod.TagModDataGenerator"
+		],
+		"client": [
+			"com.kylernarvaez.tagmod.TagModClient"
+		]
+	},
+	"mixins": [
+		"tag-mod.mixins.json"
+	],
+	"depends": {
+		"fabricloader": ">=0.18.2",
+		"minecraft": "~1.21.11",
+		"java": ">=21",
+		"fabric-api": "*"
+	},
+	"suggests": {
+		"another-mod": "*"
+	}
+}
