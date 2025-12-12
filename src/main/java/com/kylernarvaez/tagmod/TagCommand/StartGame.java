@@ -2,32 +2,41 @@ package com.kylernarvaez.tagmod.TagCommand;
 
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 
-import net.minecraft.network.packet.s2c.play.PositionFlag;
-import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.world.Heightmap;
 import net.minecraft.util.math.BlockPos;
-import java.util.EnumSet;
 
 import net.minecraft.text.Text;
 
 //Command Args
 import com.mojang.brigadier.arguments.IntegerArgumentType;
-import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.world.chunk.ChunkStatus;
+
+import java.util.HashSet;
+import java.util.List;
+import java.util.Random;
+import java.util.Set;
 
 import static net.minecraft.server.command.CommandManager.argument;
 
-import java.util.HashMap;
-import java.util.Map;
 
 
 public class StartGame {
 
     private static BlockPos arenaCenter;
     private static int arenaRadius;
+
+    private static Set<ServerPlayerEntity> seekers = new HashSet<>();
+    private static Set<ServerPlayerEntity> runners = new HashSet<>();
+
+    private static int timeLimit = -1;
+    private static int tickCounter = 0;
+    private static boolean gameRunning = false;
 
     public static void register() {
 
@@ -68,10 +77,78 @@ public class StartGame {
         });
     }
 
-    private static void startTagGame(ServerPlayerEntity itPlayer, int radius, int minutes) {
+    private static void startTagGame(ServerPlayerEntity commandPlayer, int radius, int minutes) {
+        assignRoles(commandPlayer);
+        setupArena(seekers.iterator().next(), radius);
+
+        //Setup game timer
+        timeLimit = minutes * 10;
+        gameRunning = true;
+        commandPlayer.sendMessage(Text.literal("Game has Started! Ends in " + minutes + " minutes."), false);
+    }
+
+    private static void assignRoles(ServerPlayerEntity commandPlayer) {
+        ServerWorld world = commandPlayer.getEntityWorld();
+
+        //Grab all players
+        List<ServerPlayerEntity> players = world.getPlayers();
+        giveStartingItems(players);
+
+        //Assign seeker
+        ServerPlayerEntity seeker = players.get(new Random().nextInt(players.size()));
+        seekers.clear();
+        seekers.add(seeker);
+
+        //Assign runners
+        for (ServerPlayerEntity p : players) {
+            if (p != seeker) {
+                runners.add(p);
+            }
+        }
+
+        //Announce Roles
+        for (ServerPlayerEntity p : players) {
+            if (seekers.contains(p))
+                p.sendMessage(Text.literal("You are a Seeker! Try to tag Everyone"), false);
+            else
+                p.sendMessage(Text.literal("You are a Runner! Don't Get Tagged"), false);
+        }
+
+    }
+
+    private static void giveStartingItems(List<ServerPlayerEntity> players) {
+        for (ServerPlayerEntity p : players) {
+            p.getInventory().clear();
+            p.getInventory().insertStack(new ItemStack(Items.PINK_WOOL, 64));
+            p.getInventory().insertStack(new ItemStack(Items.COOKED_BEEF, 16));
+        }
+    }
+
+    private static void endTagGame(MinecraftServer server) {
+        gameRunning = false;
+        timeLimit = -1;
+        tickCounter = 0;
+
+        for (ServerWorld world : server.getWorlds()) {
+            world.getWorldBorder().setSize(30000000);
+        }
+
+        //FIXME - Check who won
+
+        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+            p.sendMessage(Text.literal("GAME OVER!"), false);
+        }
+
+        arenaCenter = null;
+        arenaRadius = 0;
+        seekers.clear();
+        runners.clear();
+    }
+
+    private static void setupArena(ServerPlayerEntity itPlayer, int radius) {
         ServerWorld world = itPlayer.getEntityWorld();
 
-        // Teleport the "it" player
+        // Teleport the seeker
         BlockPos itPos = teleportItPlayer(itPlayer, radius);
         arenaCenter = itPos;
         arenaRadius = radius;
@@ -97,21 +174,13 @@ public class StartGame {
         int x = (int)(center.getX() + Math.cos(angle) * dist);
         int z = (int)(center.getZ() + Math.sin(angle) * dist);
 
-        int y = world.getTopPosition(Heightmap.Type.MOTION_BLOCKING, new BlockPos(x, 0, z)).getY();
+        int y = world.getTopPosition(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, new BlockPos(x, 0, z)).getY();
 
-        player.teleport(
-                world,
-                x+0.5,
-                y+1,
-                z+0.5,
-                EnumSet.of(PositionFlag.X, PositionFlag.Y, PositionFlag.Z, PositionFlag.Y_ROT, PositionFlag.X_ROT),
-                player.getYaw(),
-                player.getPitch(),
-                false
-        );
+        player.setVelocity(0,0,0);
+        player.teleport(x+0.5, y+1, z+0.5, false);
+
         player.sendMessage(Text.literal("You are in the tag arena!"), false);
     }
-
 
     private static BlockPos teleportItPlayer(ServerPlayerEntity player, int radius) {
         ServerWorld world = player.getEntityWorld();
@@ -128,11 +197,11 @@ public class StartGame {
                 player.sendMessage(Text.literal("Unsafe: " + x + " " + (y+1) + " " + z + " (Trying Again)"), false);
             }
 
-            x = (int)((Math.random() * 2 - 1) * radius);
-            z = (int)((Math.random() * 2 - 1) * radius);
+            x = (new Random().nextInt(20000) - 10000);
+            z = (new Random().nextInt(20000) - 10000);
 
-            //world.getChunk(x >> 4, z >> 4);
             world.getChunkManager().getChunk(x >> 4, z >> 4, ChunkStatus.FULL, true);
+
             BlockPos pos = new BlockPos(x, 0, z);
             y = world.getTopPosition(
                     Heightmap.Type.MOTION_BLOCKING_NO_LEAVES,
@@ -140,27 +209,32 @@ public class StartGame {
             ).getY();
 
             BlockPos checkPos = new BlockPos(x, y, z);
-            BlockPos abovePos = checkPos.up();
 
-            var state = world.getBlockState(checkPos);
-            safe = true; //!world.isAir(checkPos) && world.isAir(abovePos) && state.getFluidState().isEmpty();
+            safe = world.getBlockState(checkPos).getFluidState().isEmpty();
         }
 
-
-//        player.teleport(
-//                world,
-//                x+0.5,
-//                y+1,
-//                z+0.5,
-//                EnumSet.of(PositionFlag.X, PositionFlag.Y, PositionFlag.Z, PositionFlag.Y_ROT, PositionFlag.X_ROT),
-//                player.getYaw(),
-//                player.getPitch(),
-//                false
-//        );
-
+        player.setVelocity(0,0,0);
         player.teleport(x+0.5, y+1, z+0.5, false);
         player.sendMessage(Text.literal("Teleported to: " + x + " " + (y+1) + " " + z), false);
         return new BlockPos(x, y, z);
     }
 
+    public static void onServerTick(MinecraftServer server) {
+        if (!gameRunning) return;
+        tickCounter++;
+
+        if (tickCounter >= 20) {
+            tickCounter = 0;
+            timeLimit--;
+
+            if (timeLimit % 60 == 0 || timeLimit <= 10) {
+                for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+                    p.sendMessage(Text.literal("Time Left: " + timeLimit + "s"), false);
+                }
+            }
+        }
+        if (timeLimit <= 0) {
+            endTagGame(server);
+        }
+    }
 }
