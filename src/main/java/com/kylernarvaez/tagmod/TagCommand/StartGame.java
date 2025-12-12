@@ -16,6 +16,8 @@ import net.minecraft.text.Text;
 //Command Args
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import net.minecraft.server.command.ServerCommandSource;
+import net.minecraft.world.chunk.ChunkStatus;
+
 import static net.minecraft.server.command.CommandManager.argument;
 
 import java.util.HashMap;
@@ -28,39 +30,6 @@ public class StartGame {
     private static int arenaRadius;
 
     public static void register() {
-        
-
-        ServerTickEvents.END_SERVER_TICK.register(server -> {
-            if (arenaCenter == null) return;
-            for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
-                if (!isInsideBoundary(p, arenaCenter, arenaRadius)) {
-                    // Push back inside (teleport to nearest point inside radius)
-                    double dx = p.getX() - arenaCenter.getX();
-                    double dz = p.getZ() - arenaCenter.getZ();
-                    double distance = Math.sqrt(dx*dx + dz*dz);
-
-                    if (distance > arenaRadius) {
-                        double pushDistance = distance - arenaRadius;
-                        double ratio = pushDistance / distance;
-                        double newX = p.getX() - dx * ratio;
-                        double newZ = p.getZ() - dz * ratio;
-
-                        ServerWorld world = (ServerWorld) p.getEntityWorld();
-                        int safeY = world.getTopPosition(Heightmap.Type.MOTION_BLOCKING, new BlockPos(newX, 0, newZ)).getY();
-                        p.teleport(
-                                world,
-                                (int)newX+0.5,
-                                safeY+1,
-                                (int)newZ+0.5,
-                                EnumSet.of(PositionFlag.X, PositionFlag.Y, PositionFlag.Z, PositionFlag.Y_ROT, PositionFlag.X_ROT),
-                                p.getYaw(),
-                                p.getPitch(),
-                                false
-                        );
-                    }
-                }
-            }
-        });
 
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
             dispatcher.register(
@@ -107,6 +76,11 @@ public class StartGame {
         arenaCenter = itPos;
         arenaRadius = radius;
 
+        //Set world border
+        world.getWorldBorder().setCenter(arenaCenter.getX() + 0.5, arenaCenter.getZ() + 0.5);
+
+        world.getWorldBorder().setSize(arenaRadius * 2);
+
         // Teleport other players near the "it" player
         for (ServerPlayerEntity other : world.getPlayers()) {
             if (other != itPlayer) {
@@ -138,11 +112,6 @@ public class StartGame {
         player.sendMessage(Text.literal("You are in the tag arena!"), false);
     }
 
-    private static boolean isInsideBoundary(ServerPlayerEntity player, BlockPos center, int radius) {
-        double dx = player.getX() - center.getX();
-        double dz = player.getZ() - center.getZ();
-        return (dx*dx + dz*dz) <= (radius * radius);
-    }
 
     private static BlockPos teleportItPlayer(ServerPlayerEntity player, int radius) {
         ServerWorld world = player.getEntityWorld();
@@ -159,11 +128,11 @@ public class StartGame {
                 player.sendMessage(Text.literal("Unsafe: " + x + " " + (y+1) + " " + z + " (Trying Again)"), false);
             }
 
-            x = (int)((Math.random() - 0.5) * 2 * radius);
-            z = (int)((Math.random() - 0.5) * 2 * radius);
+            x = (int)((Math.random() * 2 - 1) * radius);
+            z = (int)((Math.random() * 2 - 1) * radius);
 
-            world.getChunk(x >> 4, z >> 4);
-
+            //world.getChunk(x >> 4, z >> 4);
+            world.getChunkManager().getChunk(x >> 4, z >> 4, ChunkStatus.FULL, true);
             BlockPos pos = new BlockPos(x, 0, z);
             y = world.getTopPosition(
                     Heightmap.Type.MOTION_BLOCKING_NO_LEAVES,
@@ -178,16 +147,18 @@ public class StartGame {
         }
 
 
-        player.teleport(
-                world,
-                x+0.5,
-                y+1,
-                z+0.5,
-                EnumSet.of(PositionFlag.X, PositionFlag.Y, PositionFlag.Z, PositionFlag.Y_ROT, PositionFlag.X_ROT),
-                player.getYaw(),
-                player.getPitch(),
-                false
-        );
+//        player.teleport(
+//                world,
+//                x+0.5,
+//                y+1,
+//                z+0.5,
+//                EnumSet.of(PositionFlag.X, PositionFlag.Y, PositionFlag.Z, PositionFlag.Y_ROT, PositionFlag.X_ROT),
+//                player.getYaw(),
+//                player.getPitch(),
+//                false
+//        );
+
+        player.teleport(x+0.5, y+1, z+0.5, false);
         player.sendMessage(Text.literal("Teleported to: " + x + " " + (y+1) + " " + z), false);
         return new BlockPos(x, y, z);
     }
