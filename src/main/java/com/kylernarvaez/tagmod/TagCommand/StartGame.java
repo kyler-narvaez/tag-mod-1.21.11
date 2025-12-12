@@ -83,8 +83,8 @@ public class StartGame {
 
         //Setup game timer
         timeLimit = minutes * 10;
-        gameRunning = true;
         commandPlayer.sendMessage(Text.literal("Game has Started! Ends in " + minutes + " minutes."), false);
+        gameRunning = true;
     }
 
     private static void assignRoles(ServerPlayerEntity commandPlayer) {
@@ -154,14 +154,14 @@ public class StartGame {
         arenaRadius = radius;
 
         //Set world border
-        world.getWorldBorder().setCenter(arenaCenter.getX() + 0.5, arenaCenter.getZ() + 0.5);
+        world.getWorldBorder().setCenter(arenaCenter.getX(), arenaCenter.getZ());
 
         world.getWorldBorder().setSize(arenaRadius * 2);
 
         // Teleport other players near the "it" player
         for (ServerPlayerEntity other : world.getPlayers()) {
             if (other != itPlayer) {
-                teleportNear(other, itPos, radius - 1);
+                teleportNear(other, itPos, radius - 2);
             }
         }
     }
@@ -171,8 +171,11 @@ public class StartGame {
 
         double angle = Math.random() * 2 * Math.PI;
         double dist = Math.random() * radius;
+
         int x = (int)(center.getX() + Math.cos(angle) * dist);
         int z = (int)(center.getZ() + Math.sin(angle) * dist);
+
+        world.getChunkManager().getChunk(x >> 4, z >> 4, ChunkStatus.FULL, true);
 
         int y = world.getTopPosition(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, new BlockPos(x, 0, z)).getY();
 
@@ -190,15 +193,17 @@ public class StartGame {
 
         int x = 0, y = 0, z = 0;
 
-        while (!safe && attempts < 20) {
+        while (!safe && attempts < 10) {
             attempts++;
 
             if (attempts != 1) {
                 player.sendMessage(Text.literal("Unsafe: " + x + " " + (y+1) + " " + z + " (Trying Again)"), false);
+            } else if (attempts == 10) {
+                player.sendMessage(Text.literal("Unsafe: " + x + " " + (y+1) + " " + z + " (Last Attempt)"), false);
             }
 
-            x = (new Random().nextInt(20000) - 10000);
-            z = (new Random().nextInt(20000) - 10000);
+            x = new Random().nextInt(20000) - 10000;
+            z = new Random().nextInt(20000) - 10000;
 
             world.getChunkManager().getChunk(x >> 4, z >> 4, ChunkStatus.FULL, true);
 
@@ -208,9 +213,14 @@ public class StartGame {
                     pos
             ).getY();
 
-            BlockPos checkPos = new BlockPos(x, y, z);
+            BlockPos ground = new BlockPos(x, y, z);
+            BlockPos head = ground.up();
 
-            safe = world.getBlockState(checkPos).getFluidState().isEmpty();
+            boolean solidGround = !world.getBlockState(ground).isAir();
+            boolean headClear = world.getBlockState(head).isAir();
+            boolean noFluid = world.getBlockState(ground).getFluidState().isEmpty();
+
+            safe = solidGround && headClear && noFluid;
         }
 
         player.setVelocity(0,0,0);
