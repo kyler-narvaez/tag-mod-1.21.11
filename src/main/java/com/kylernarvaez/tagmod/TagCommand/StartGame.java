@@ -2,12 +2,15 @@ package com.kylernarvaez.tagmod.TagCommand;
 
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 
+import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
+import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.ActionResult;
 import net.minecraft.world.Heightmap;
 import net.minecraft.util.math.BlockPos;
 
@@ -16,6 +19,7 @@ import net.minecraft.text.Text;
 //Command Args
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import net.minecraft.world.chunk.ChunkStatus;
+import org.apache.logging.log4j.core.jmx.Server;
 
 import java.util.HashSet;
 import java.util.List;
@@ -37,6 +41,8 @@ public class StartGame {
     private static int timeLimit = -1;
     private static int tickCounter = 0;
     private static boolean gameRunning = false;
+    private static MinecraftServer mainServer = null;
+
 
     public static void register() {
 
@@ -50,6 +56,8 @@ public class StartGame {
                                                 int minutes = IntegerArgumentType.getInteger(context, "minutes");
 
                                                 ServerPlayerEntity itPlayer = context.getSource().getPlayer();
+                                                mainServer = itPlayer.getEntityWorld().getServer();
+
                                                 context.getSource().sendFeedback(
                                                         () -> Text.literal("Starting Game with radius " + radius + " and time to seek " + minutes + " (minutes)"),
                                                         false
@@ -63,6 +71,7 @@ public class StartGame {
                             )
                             .executes(context -> {
                                 ServerPlayerEntity itPlayer = context.getSource().getPlayer();
+                                mainServer = itPlayer.getEntityWorld().getServer();
                                 //teleportPlayer(player, 1000, 20); // default radius & attempts
                                 startTagGame(itPlayer, 20, 5);
                                 context.getSource().sendFeedback(
@@ -75,6 +84,36 @@ public class StartGame {
 
             );
         });
+
+        AttackEntityCallback.EVENT.register((player, world, hand, entity, hitResult) -> {
+            if (!gameRunning) return ActionResult.PASS;
+            if (!(entity instanceof ServerPlayerEntity target)) return ActionResult.PASS;
+
+            // Only seekers can tag
+            if (!seekers.contains(player)) return ActionResult.PASS;
+
+            // Only tag runners
+            if (!runners.contains(target)) return ActionResult.PASS;
+
+            tagPlayer(player, target);
+            return ActionResult.SUCCESS; // cancel normal attack
+        });
+    }
+
+    private static void tagPlayer(PlayerEntity seeker, ServerPlayerEntity runner) {
+        runners.remove(runner);
+        seekers.add(runner);
+
+        seeker.sendMessage(Text.literal("You tagged " + runner.getName().getString() + "!"), false);
+        runner.sendMessage(Text.literal("Totally Outplayed Too Be Honest. You Be Seeking Now!"), false);
+
+        //runner.addStatusEffect(new StatusEffectInstance(StatusEffects.GLOWING, 60));
+        //seeker.addStatusEffect(new StatusEffectInstance(StatusEffects.SPEED, 40));
+
+
+        if (runners.isEmpty()) {
+            endTagGame(seeker.getEntityWorld().getServer());
+        }
     }
 
     private static void startTagGame(ServerPlayerEntity commandPlayer, int radius, int minutes) {
@@ -82,7 +121,7 @@ public class StartGame {
         setupArena(seekers.iterator().next(), radius);
 
         //Setup game timer
-        timeLimit = minutes * 10;
+        timeLimit = minutes * 60;
         commandPlayer.sendMessage(Text.literal("Game has Started! Ends in " + minutes + " minutes."), false);
         gameRunning = true;
     }
@@ -92,10 +131,14 @@ public class StartGame {
 
         //Grab all players
         List<ServerPlayerEntity> players = world.getPlayers();
-        giveStartingItems(players);
+        for (ServerPlayerEntity p : players) {
+            giveStartingItems(p);
+        }
 
         //Assign seeker
         ServerPlayerEntity seeker = players.get(new Random().nextInt(players.size()));
+        broadcastMessage(seeker.getName() + " is It! Run Gamers!");
+        seeker.sendMessage(Text.literal("You are a Seeker: Zombie Tag Style"), false);
         seekers.clear();
         seekers.add(seeker);
 
@@ -103,28 +146,24 @@ public class StartGame {
         for (ServerPlayerEntity p : players) {
             if (p != seeker) {
                 runners.add(p);
+                p.sendMessage(Text.literal("RUN FORREST RUN"), false);
             }
         }
 
-        //Announce Roles
-        for (ServerPlayerEntity p : players) {
-            if (seekers.contains(p))
-                p.sendMessage(Text.literal("You are a Seeker! Try to tag Everyone"), false);
-            else
-                p.sendMessage(Text.literal("You are a Runner! Don't Get Tagged"), false);
-        }
-
     }
 
-    private static void giveStartingItems(List<ServerPlayerEntity> players) {
-        for (ServerPlayerEntity p : players) {
-            p.getInventory().clear();
-            p.getInventory().insertStack(new ItemStack(Items.PINK_WOOL, 64));
-            p.getInventory().insertStack(new ItemStack(Items.COOKED_BEEF, 16));
-        }
+    private static void giveStartingItems(ServerPlayerEntity player) {
+        player.getInventory().clear();
+        int stackCount = seekers.contains(player) ? mainServer.getCurrentPlayerCount() : 1;
+        player.getInventory().insertStack(new ItemStack(Items.PINK_WOOL, 64 * stackCount));
+        player.getInventory().insertStack(new ItemStack(Items.COOKED_BEEF, 16 * stackCount));
     }
 
     private static void endTagGame(MinecraftServer server) {
+        String winnerString = "Runners Win! Runners do be runnin!";
+        if (timeLimit > 0) {
+            winnerString = "Seekers Win! Seeking love from no one. . .";
+        }
         gameRunning = false;
         timeLimit = -1;
         tickCounter = 0;
@@ -133,16 +172,13 @@ public class StartGame {
             world.getWorldBorder().setSize(30000000);
         }
 
-        //FIXME - Check who won
-
-        for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
-            p.sendMessage(Text.literal("GAME OVER!"), false);
-        }
+        broadcastMessage("GAME OVER! " + winnerString);
 
         arenaCenter = null;
         arenaRadius = 0;
         seekers.clear();
         runners.clear();
+        mainServer = null;
     }
 
     private static void setupArena(ServerPlayerEntity itPlayer, int radius) {
@@ -181,8 +217,6 @@ public class StartGame {
 
         player.setVelocity(0,0,0);
         player.teleport(x+0.5, y+1, z+0.5, false);
-
-        player.sendMessage(Text.literal("You are in the tag arena!"), false);
     }
 
     private static BlockPos teleportItPlayer(ServerPlayerEntity player, int radius) {
@@ -245,6 +279,44 @@ public class StartGame {
         }
         if (timeLimit <= 0) {
             endTagGame(server);
+        }
+    }
+
+    public static boolean isGameRunning() {
+        return gameRunning;
+    }
+
+    public static void onPlayerDeath(ServerPlayerEntity player) {
+        if (!runners.contains(player)) return ;
+
+        runners.remove(player);
+        seekers.add(player);
+
+        player.sendMessage(Text.literal("IDIOT PLAY! You died dumb dumb, you be seeking now!"), false);
+        if (runners.isEmpty()) {
+            endTagGame(player.getEntityWorld().getServer());
+        }
+    }
+
+    public static void onPlayerRespawn(ServerPlayerEntity player) {
+        if (arenaCenter == null) return;
+
+        teleportNear(player, arenaCenter, arenaRadius - 1);
+        giveStartingItems(player);
+        player.sendMessage(
+                Text.literal("Seeker: Get back in it bro!"),
+                false
+        );
+    }
+
+    private static void broadcastMessage(String message) {
+
+        List<ServerPlayerEntity> players = mainServer.getPlayerManager().getPlayerList();
+        for (ServerPlayerEntity p : players) {
+            p.sendMessage(
+                    Text.literal(message),
+                    false
+            );
         }
     }
 }
