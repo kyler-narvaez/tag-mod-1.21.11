@@ -19,6 +19,7 @@ public class TagMod implements ModInitializer {
 	public void onInitialize() {
 		StartGame.register();
 		registerDeathHandler();
+		registerRespawnHandler();
 
 		// Register the tick listener ONCE
 		ServerTickEvents.END_SERVER_TICK.register(server -> {
