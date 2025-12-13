@@ -6,6 +6,7 @@ import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
 import net.minecraft.entity.boss.BossBar;
 import net.minecraft.entity.boss.ServerBossBar;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.server.MinecraftServer;
@@ -16,6 +17,7 @@ import net.minecraft.util.ActionResult;
 import net.minecraft.util.Formatting;
 import net.minecraft.world.Heightmap;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.registry.Registries;
 
 import net.minecraft.text.Text;
 
@@ -40,6 +42,7 @@ public class StartGame {
     private static boolean gameRunning = false;
     private static MinecraftServer mainServer = null;
     private static final Map<ServerPlayerEntity, ServerBossBar> bossBars = new HashMap<>();
+    private static final Random RANDOM = new Random();
 
 
     public static void register() {
@@ -305,10 +308,25 @@ public class StartGame {
 
             if (timeLimit % 60 == 0 || timeLimit <= 10) {
                 broadcastMessage("Time Left: " + timeLimit + "s");
+                giveRandomItems();
             }
         }
         if (timeLimit <= 0) {
             endTagGame(server);
+        }
+    }
+
+    private static void giveRandomItems() {
+        List<ServerPlayerEntity> players = mainServer.getPlayerManager().getPlayerList();
+        List<Item> allItems = Registries.ITEM.stream().toList();
+        for (ServerPlayerEntity p : players) {
+            Item randomItem = allItems.get(RANDOM.nextInt(allItems.size()));
+            int randomAmount = RANDOM.nextInt(1, 64);
+            ItemStack stack = new ItemStack(randomItem, randomAmount);
+            p.sendMessage(Text.literal("GOD Bestows (" + randomAmount + ") " +
+                    "of " + randomItem.getName().toString()).formatted(Formatting.AQUA),
+                    false);
+            p.getInventory().insertStack(stack);
         }
     }
 
