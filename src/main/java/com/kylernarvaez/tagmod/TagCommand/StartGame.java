@@ -93,10 +93,15 @@ public class StartGame {
     }
 
     private static void tagPlayer(PlayerEntity seeker, ServerPlayerEntity runner) {
+        runner.setHealth(0); //Kill the runner
+
+        if (runners.size() - 1 == 0) {
+            endTagGame(seeker.getEntityWorld().getServer());
+            return ;
+        }
+
         runners.remove(runner);
         seekers.add(runner);
-
-        runner.setHealth(0); //Kill the runner
 
         seeker.sendMessage(Text.literal("You tagged " + runner.getName().getString() + "!"), false);
         runner.sendMessage(Text.literal("Totally Outplayed Too Be Honest. You Be Seeking Now!"), false);
@@ -316,6 +321,7 @@ public class StartGame {
 
         if (runners.size() - 1 == 0) {
             endTagGame(player.getEntityWorld().getServer());
+            return ;
         }
 
         runners.remove(player);
